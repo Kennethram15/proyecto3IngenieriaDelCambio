@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Peluchitos - Panel admin</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="/css/style.css" rel="stylesheet">
+</head>
+<body>
+  <div id="nav"></div>
+  <div class="container py-4">
+    <h2 class="mb-3">Panel de administración ⚙️</h2>
+
+    <ul class="nav nav-tabs mb-3">
+      <li class="nav-item"><button class="nav-link active" data-tab="productos">Productos e inventario</button></li>
+      <li class="nav-item"><button class="nav-link" data-tab="pedidos">Pedidos</button></li>
+      <li class="nav-item"><button class="nav-link" data-tab="usuarios">Usuarios</button></li>
+    </ul>
+
+    <!-- PRODUCTOS -->
+    <section id="tab-productos">
+      <form class="card p-3 mb-3" id="form-producto">
+        <h5 id="titulo-form">Nuevo producto</h5>
+        <input type="hidden" id="p-id">
+        <div class="row g-2">
+          <div class="col-6 col-md-2"><input class="form-control" id="p-emoji" placeholder="Emoji" value="🧸" maxlength="4"></div>
+          <div class="col-6 col-md-3"><input class="form-control" id="p-nombre" placeholder="Nombre" required></div>
+          <div class="col-12 col-md-3"><input class="form-control" id="p-desc" placeholder="Descripción"></div>
+          <div class="col-6 col-md-2"><input class="form-control" id="p-precio" type="number" step="0.01" min="0.01" placeholder="Precio" required></div>
+          <div class="col-6 col-md-2"><input class="form-control" id="p-stock" type="number" min="0" placeholder="Stock" required></div>
+        </div>
+        <div class="mt-2">
+          <button class="btn btn-primary btn-sm">Guardar</button>
+          <button type="button" class="btn btn-secondary btn-sm d-none" id="btn-cancelar-edicion">Cancelar edición</button>
+        </div>
+      </form>
+      <div class="card p-3"><div class="table-responsive">
+        <table class="table align-middle mb-0">
+          <thead><tr><th></th><th>Nombre</th><th>Precio</th><th>Stock</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="filas-productos"></tbody>
+        </table>
+      </div></div>
+    </section>
+
+    <!-- PEDIDOS -->
+    <section id="tab-pedidos" class="d-none"><div id="lista-pedidos"></div></section>
+
+    <!-- USUARIOS -->
+    <section id="tab-usuarios" class="d-none">
+      <div class="card p-3"><div class="table-responsive">
+        <table class="table align-middle mb-0">
+          <thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Pedidos</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="filas-usuarios"></tbody>
+        </table>
+      </div></div>
+    </section>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="/js/app.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    let productos = [];
+
+    async function iniciar() {
+      const user = await cargarNav();
+      if (!user || user.rol !== 'admin') { location.href = '/login.html'; return; }
+      cargarProductos();
+    }
+
+    // ----- Pestañas -----
+    document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => {
+      document.querySelectorAll('[data-tab]').forEach(x => x.classList.toggle('active', x === b));
+      ['productos', 'pedidos', 'usuarios'].forEach(t => $('tab-' + t).classList.toggle('d-none', t !== b.dataset.tab));
+      if (b.dataset.tab === 'productos') cargarProductos();
+      if (b.dataset.tab === 'pedidos') cargarPedidos();
+      if (b.dataset.tab === 'usuarios') cargarUsuarios();
+    });
+
+    // ----- Productos -----
+    async function cargarProductos() {
+      productos = await api('/api/admin/productos');
+      $('filas-productos').innerHTML = productos.map(p => `
+        <tr class="${p.activo ? '' : 'table-secondary'}">
+          <td class="fs-3">${esc(p.emoji)}</td>
+          <td>${esc(p.nombre)}<div class="small text-muted">${esc(p.descripcion)}</div></td>
+          <td>${q(p.precio)}</td>
+          <td class="${p.stock <= 5 ? 'stock-bajo' : ''}">${p.stock}${p.stock <= 5 ? ' ⚠️' : ''}</td>
+          <td>${p.activo ? '<span class="badge text-bg-success">Activo</span>' : '<span class="badge text-bg-secondary">Inactivo</span>'}</td>
+          <td class="text-nowrap">
+            <button class="btn btn-outline-primary btn-sm" data-edit="${p.id}">Editar</button>
+            <button class="btn btn-outline-danger btn-sm" data-del="${p.id}">Eliminar</button>
+          </td>
+        </tr>`).join('');
+      document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => editar(Number(b.dataset.edit)));
+      document.querySelectorAll('[data-del]').forEach(b => b.onclick = () => eliminar(Number(b.dataset.del)));
+    }
+
+    function limpiarForm() {
+      $('form-producto').reset();
+      $('p-id').value = '';
+      $('p-emoji').value = '🧸';
+      $('titulo-form').textContent = 'Nuevo producto';
+      $('btn-cancelar-edicion').classList.add('d-none');
+    }
+    $('btn-cancelar-edicion').onclick = limpiarForm;
+
+    function editar(id) {
+      const p = productos.find(x => x.id === id);
+      $('p-id').value = p.id; $('p-emoji').value = p.emoji; $('p-nombre').value = p.nombre;
+      $('p-desc').value = p.descripcion; $('p-precio').value = p.precio; $('p-stock').value = p.stock;
+      $('titulo-form').textContent = 'Editando: ' + p.nombre;
+      $('btn-cancelar-edicion').classList.remove('d-none');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    $('form-producto').onsubmit = async e => {
+      e.preventDefault();
+      const cuerpo = {
+        emoji: $('p-emoji').value, nombre: $('p-nombre').value, descripcion: $('p-desc').value,
+        precio: Number($('p-precio').value), stock: Number($('p-stock').value)
+      };
+      try {
+        const id = $('p-id').value;
+        if (id) { cuerpo.activo = 1; await api('/api/admin/productos/' + id, 'PUT', cuerpo); }
+        else await api('/api/admin/productos', 'POST', cuerpo);
+        aviso('Producto guardado.');
+        limpiarForm();
+        cargarProductos();
+      } catch (err) { aviso(err.message, 'danger'); }
+    };
+
+    async function eliminar(id) {
+      if (!confirm('¿Eliminar este producto?')) return;
+      try {
+        const r = await api('/api/admin/productos/' + id, 'DELETE');
+        aviso(r.mensaje, 'info');
+        cargarProductos();
+      } catch (err) { aviso(err.message, 'danger'); }
+    }
+
+    // ----- Pedidos -----
+    const SIGUIENTE = { Pendiente: 'Despachado', Pagado: 'Despachado', Despachado: 'Enviado', Enviado: 'Entregado' };
+
+    async function cargarPedidos() {
+      const pedidos = await api('/api/admin/pedidos');
+      if (!pedidos.length) { $('lista-pedidos').innerHTML = '<div class="alert alert-info">Todavía no hay pedidos.</div>'; return; }
+      $('lista-pedidos').innerHTML = pedidos.map(p => `
+        <div class="card p-3 mb-3">
+          <div class="d-flex justify-content-between flex-wrap gap-2">
+            <div><strong>Pedido #${p.id}</strong> — ${esc(p.cliente)} <span class="text-muted small">(${esc(p.email)})</span></div>
+            <div>${badge(p.estado)}</div>
+          </div>
+          <ul class="mb-1 mt-2">
+            ${p.items.map(i => `<li>${esc(i.emoji)} ${esc(i.nombre)} x${i.cantidad}</li>`).join('')}
+          </ul>
+          <div class="small text-muted">${esc(p.direccion)} · Tel: ${esc(p.telefono)} ·
+            ${p.metodo_pago === 'tarjeta' ? 'Tarjeta ****' + esc(p.tarjeta_ultimos4) : 'Contra entrega'} · ${new Date(p.fecha).toLocaleString()}</div>
+          <div class="d-flex justify-content-between align-items-center mt-2">
+            <strong>${q(p.total)}</strong>
+            <div class="d-flex gap-2">
+              ${SIGUIENTE[p.estado] ? `<button class="btn btn-primary btn-sm" data-estado="${SIGUIENTE[p.estado]}" data-id="${p.id}">Marcar como ${SIGUIENTE[p.estado]}</button>` : ''}
+              ${!['Entregado', 'Cancelado'].includes(p.estado) ? `<button class="btn btn-outline-danger btn-sm" data-estado="Cancelado" data-id="${p.id}">Anular</button>` : ''}
+            </div>
+          </div>
+        </div>`).join('');
+
+      document.querySelectorAll('[data-estado]').forEach(b => b.onclick = async () => {
+        if (b.dataset.estado === 'Cancelado' && !confirm('¿Anular este pedido? El stock se devolverá al inventario.')) return;
+        try {
+          await api(`/api/admin/pedidos/${b.dataset.id}/estado`, 'PUT', { estado: b.dataset.estado });
+          aviso('Pedido actualizado.');
+        } catch (err) { aviso(err.message, 'danger'); }
+        cargarPedidos();
+      });
+    }
+
+    // ----- Usuarios -----
+    async function cargarUsuarios() {
+      const us = await api('/api/admin/usuarios');
+      $('filas-usuarios').innerHTML = us.map(u => `
+        <tr>
+          <td>${esc(u.nombre)}</td><td>${esc(u.email)}</td>
+          <td>${esc(u.rol)}</td><td>${u.pedidos}</td>
+          <td>${u.activo ? '<span class="badge text-bg-success">Activo</span>' : '<span class="badge text-bg-secondary">Desactivado</span>'}</td>
+          <td>${u.rol === 'cliente'
+            ? `<button class="btn btn-outline-secondary btn-sm" data-user="${u.id}" data-activo="${u.activo ? 0 : 1}">${u.activo ? 'Desactivar' : 'Activar'}</button>` : ''}</td>
+        </tr>`).join('');
+      document.querySelectorAll('[data-user]').forEach(b => b.onclick = async () => {
+        try {
+          await api(`/api/admin/usuarios/${b.dataset.user}/activo`, 'PUT', { activo: b.dataset.activo === '1' });
+          cargarUsuarios();
+        } catch (err) { aviso(err.message, 'danger'); }
+      });
+    }
+
+    iniciar();
+  </script>
+</body>
+</html>
