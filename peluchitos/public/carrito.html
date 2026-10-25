@@ -13,6 +13,7 @@
     <h2 class="mb-3">Tu carrito 🛒</h2>
     <div id="vacio" class="alert alert-info d-none">Tu carrito está vacío. <a href="/index.html">Ir al catálogo</a></div>
 
+    <div id="no-disponible" class="alert alert-warning d-none">Hay productos inactivos o sin existencias suficientes. Quita los inactivos y ajusta las cantidades antes de comprar.</div>
     <div class="row g-4 d-none" id="contenido">
       <!-- Lista del carrito -->
       <div class="col-lg-7">
@@ -74,12 +75,15 @@
       $('vacio').classList.toggle('d-none', items.length > 0);
       $('contenido').classList.toggle('d-none', items.length === 0);
       $('total').textContent = q(total);
+      const bloqueado = items.some(i => !i.activo || i.cantidad > i.stock);
+      $('no-disponible').classList.toggle('d-none', !bloqueado);
+      $('btn-comprar').disabled = bloqueado || !items.length;
 
       $('filas').innerHTML = items.map(i => `
         <tr>
-          <td>${esc(i.emoji)} ${esc(i.nombre)}</td>
+          <td>${esc(i.emoji)} ${esc(i.nombre)} ${!i.activo ? '<span class="badge text-bg-secondary">No disponible</span>' : ''}</td>
           <td>${q(i.precio)}</td>
-          <td><input type="number" class="form-control form-control-sm cantidad-input" min="1" max="${i.stock}"
+          <td><input type="number" class="form-control form-control-sm cantidad-input" min="1" step="1" max="${i.stock}" ${!i.activo ? 'disabled' : ''}
                 value="${i.cantidad}" data-id="${i.producto_id}"></td>
           <td>${q(i.precio * i.cantidad)}</td>
           <td><button class="btn btn-outline-danger btn-sm" data-del="${i.producto_id}">Quitar</button></td>

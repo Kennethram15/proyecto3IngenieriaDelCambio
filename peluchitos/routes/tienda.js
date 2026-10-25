@@ -1,8 +1,13 @@
 const express = require('express');
 const db = require('../db');
-const { requireLogin } = require('../middleware/auth');
+const { requireCliente } = require('../middleware/auth');
 
+const { integer, price } = require('../validation');
 const router = express.Router();
+for (const param of ['id', 'productoId']) router.param(param, (req, res, next, value) => {
+  if (!integer(value)) return res.status(400).json({ error: 'Identificador no válido.' });
+  next();
+});
 
 // ---------- Catálogo ----------
 router.get('/productos', async (req, res, next) => {
@@ -15,32 +20,36 @@ router.get('/productos', async (req, res, next) => {
 });
 
 // ---------- Carrito ----------
-async function leerCarrito(usuarioId) {
-  const [items] = await db.query(
-    `SELECT c.producto_id, c.cantidad, p.nombre, p.precio, p.stock, p.emoji
+async function leerCarrito(usuarioId, conn = db) {
+  const [items] = await conn.query(
+    `SELECT c.producto_id, c.cantidad, p.nombre, p.precio, p.stock, p.emoji, p.activo
      FROM carrito_items c JOIN productos p ON p.id = c.producto_id
-     WHERE c.usuario_id = ? AND p.activo = 1 ORDER BY c.id`,
+     WHERE c.usuario_id = ? ORDER BY c.id`,
     [usuarioId]
   );
-  const total = items.reduce((s, i) => s + i.precio * i.cantidad, 0);
-  return { items, total: Math.round(total * 100) / 100 };
+  const centavos = items.reduce((s, i) => s + Math.round(i.precio * 100) * i.cantidad, 0);
+  return { items, total: centavos / 100 };
 }
 
-router.get('/carrito', requireLogin, async (req, res, next) => {
+router.get('/carrito', requireCliente, async (req, res, next) => {
   try { res.json(await leerCarrito(req.session.user.id)); } catch (err) { next(err); }
 });
 
 // Agregar al carrito (suma si ya existe)
-router.post('/carrito', requireLogin, async (req, res, next) => {
+router.post('/carrito', requireCliente, async (req, res, next) => {
+  let conn;
   try {
-    const productoId = parseInt(req.body.producto_id, 10);
-    const cantidad = parseInt(req.body.cantidad || 1, 10);
-    if (!productoId || cantidad < 1) return res.status(400).json({ error: 'Datos no válidos.' });
+    conn = await db.getConnection();
+    await conn.beginTransaction();
+    await conn.query('SELECT id FROM usuarios WHERE id = ? FOR UPDATE', [req.session.user.id]);
+    const productoId = integer(req.body.producto_id);
+    const cantidad = integer(req.body.cantidad === undefined ? 1 : req.body.cantidad);
+    if (!productoId || !cantidad) return res.status(400).json({ error: 'Datos no válidos.' });
 
-    const [[p]] = await db.query('SELECT stock FROM productos WHERE id = ? AND activo = 1', [productoId]);
+    const [[p]] = await conn.query('SELECT stock FROM productos WHERE id = ? AND activo = 1', [productoId]);
     if (!p) return res.status(404).json({ error: 'Producto no disponible.' });
 
-    const [[actual]] = await db.query(
+    const [[actual]] = await conn.query(
       'SELECT cantidad FROM carrito_items WHERE usuario_id = ? AND producto_id = ?',
       [req.session.user.id, productoId]
     );
@@ -49,43 +58,70 @@ router.post('/carrito', requireLogin, async (req, res, next) => {
       return res.status(400).json({ error: `Stock insuficiente. Solo quedan ${p.stock} unidades.` });
     }
 
-    await db.query(
+    await conn.query(
       `INSERT INTO carrito_items (usuario_id, producto_id, cantidad) VALUES (?, ?, ?)
        ON DUPLICATE KEY UPDATE cantidad = ?`,
       [req.session.user.id, productoId, nueva, nueva]
     );
-    res.json(await leerCarrito(req.session.user.id));
-  } catch (err) { next(err); }
+    const carrito = await leerCarrito(req.session.user.id, conn);
+    await conn.commit();
+    res.json(carrito);
+  } catch (err) { next(err); } finally {
+    if (conn) {
+      try { await conn.rollback(); } finally { conn.release(); }
+    }
+  }
 });
 
 // Modificar cantidad
-router.put('/carrito/:productoId', requireLogin, async (req, res, next) => {
+router.put('/carrito/:productoId', requireCliente, async (req, res, next) => {
+  let conn;
   try {
-    const productoId = parseInt(req.params.productoId, 10);
-    const cantidad = parseInt(req.body.cantidad, 10);
+    conn = await db.getConnection();
+    await conn.beginTransaction();
+    await conn.query('SELECT id FROM usuarios WHERE id = ? FOR UPDATE', [req.session.user.id]);
+    const productoId = integer(req.params.productoId);
+    const cantidad = integer(req.body.cantidad);
     if (!productoId || !cantidad || cantidad < 1) return res.status(400).json({ error: 'Cantidad no válida.' });
 
-    const [[p]] = await db.query('SELECT stock FROM productos WHERE id = ? AND activo = 1', [productoId]);
+    const [[p]] = await conn.query('SELECT stock FROM productos WHERE id = ? AND activo = 1', [productoId]);
     if (!p) return res.status(404).json({ error: 'Producto no disponible.' });
     if (cantidad > p.stock) return res.status(400).json({ error: `Stock insuficiente. Solo quedan ${p.stock} unidades.` });
 
-    await db.query(
+    await conn.query(
       'UPDATE carrito_items SET cantidad = ? WHERE usuario_id = ? AND producto_id = ?',
       [cantidad, req.session.user.id, productoId]
     );
-    res.json(await leerCarrito(req.session.user.id));
-  } catch (err) { next(err); }
+    const carrito = await leerCarrito(req.session.user.id, conn);
+    await conn.commit();
+    res.json(carrito);
+  } catch (err) { next(err); } finally {
+    if (conn) {
+      try { await conn.rollback(); } finally { conn.release(); }
+    }
+  }
 });
 
 // Eliminar del carrito
-router.delete('/carrito/:productoId', requireLogin, async (req, res, next) => {
+router.delete('/carrito/:productoId', requireCliente, async (req, res, next) => {
+  let conn;
   try {
-    await db.query(
+    conn = await db.getConnection();
+    await conn.beginTransaction();
+    await conn.query('SELECT id FROM usuarios WHERE id = ? FOR UPDATE', [req.session.user.id]);
+    if (!integer(req.params.productoId)) return res.status(400).json({ error: 'Producto no valido.' });
+    await conn.query(
       'DELETE FROM carrito_items WHERE usuario_id = ? AND producto_id = ?',
-      [req.session.user.id, parseInt(req.params.productoId, 10)]
+      [req.session.user.id, integer(req.params.productoId)]
     );
-    res.json(await leerCarrito(req.session.user.id));
-  } catch (err) { next(err); }
+    const carrito = await leerCarrito(req.session.user.id, conn);
+    await conn.commit();
+    res.json(carrito);
+  } catch (err) { next(err); } finally {
+    if (conn) {
+      try { await conn.rollback(); } finally { conn.release(); }
+    }
+  }
 });
 
 // ---------- Pago simulado ----------
@@ -116,12 +152,12 @@ function validarTarjeta(t) {
 
 // ---------- Pedidos ----------
 // Confirmar compra (checkout) con transacción para que el stock no se descuadre
-router.post('/pedidos', requireLogin, async (req, res, next) => {
+router.post('/pedidos', requireCliente, async (req, res, next) => {
   const direccion = String(req.body.direccion || '').trim();
   const telefono = String(req.body.telefono || '').trim();
   const metodo = req.body.metodo_pago;
 
-  if (direccion.length < 5) return res.status(400).json({ error: 'Escribe una dirección de envío válida.' });
+  if (direccion.length < 5 || direccion.length > 255) return res.status(400).json({ error: 'Escribe una dirección de envío válida.' });
   if (!/^[0-9+\-\s]{8,15}$/.test(telefono)) return res.status(400).json({ error: 'Teléfono no válido.' });
   if (!['tarjeta', 'contra_entrega'].includes(metodo)) return res.status(400).json({ error: 'Elige un método de pago.' });
 
@@ -134,14 +170,16 @@ router.post('/pedidos', requireLogin, async (req, res, next) => {
     estado = 'Pagado';
   }
 
-  const conn = await db.getConnection();
+  let conn;
   try {
+    conn = await db.getConnection();
     await conn.beginTransaction();
+    await conn.query('SELECT id FROM usuarios WHERE id = ? FOR UPDATE', [req.session.user.id]);
 
     const [items] = await conn.query(
       `SELECT c.producto_id, c.cantidad, p.nombre, p.precio, p.stock, p.activo
        FROM carrito_items c JOIN productos p ON p.id = c.producto_id
-       WHERE c.usuario_id = ? FOR UPDATE`,
+       WHERE c.usuario_id = ? ORDER BY c.producto_id FOR UPDATE`,
       [req.session.user.id]
     );
     if (!items.length) {
@@ -149,13 +187,17 @@ router.post('/pedidos', requireLogin, async (req, res, next) => {
       return res.status(400).json({ error: 'Tu carrito está vacío.' });
     }
     for (const i of items) {
-      if (!i.activo || i.cantidad > i.stock) {
+      if (!i.activo || !integer(i.cantidad) || !price(i.precio) || i.cantidad > i.stock) {
         await conn.rollback();
-        return res.status(400).json({ error: `"${i.nombre}" ya no tiene stock suficiente. Ajusta tu carrito.` });
+        return res.status(400).json({ error: `"${i.nombre}" no está disponible o no tiene existencias suficientes. Ajusta tu carrito.` });
       }
     }
 
-    const total = Math.round(items.reduce((s, i) => s + i.precio * i.cantidad, 0) * 100) / 100;
+    const total = items.reduce((s, i) => s + Math.round(i.precio * 100) * i.cantidad, 0) / 100;
+    if (total > 99999999.99) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'El total excede el máximo permitido.' });
+    }
     const [ped] = await conn.query(
       `INSERT INTO pedidos (usuario_id, total, estado, direccion, telefono, metodo_pago, tarjeta_ultimos4)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -173,15 +215,15 @@ router.post('/pedidos', requireLogin, async (req, res, next) => {
     await conn.commit();
     res.status(201).json({ pedido_id: ped.insertId, total, estado });
   } catch (err) {
-    await conn.rollback();
+    if (conn) await conn.rollback();
     next(err);
   } finally {
-    conn.release();
+    if (conn) conn.release();
   }
 });
 
 // Mis pedidos (con su detalle)
-router.get('/pedidos', requireLogin, async (req, res, next) => {
+router.get('/pedidos', requireCliente, async (req, res, next) => {
   try {
     const [pedidos] = await db.query(
       'SELECT id, total, estado, direccion, metodo_pago, fecha FROM pedidos WHERE usuario_id = ? ORDER BY id DESC',
@@ -200,9 +242,10 @@ router.get('/pedidos', requireLogin, async (req, res, next) => {
 });
 
 // Cancelar pedido (solo si aún no ha sido despachado). Devuelve el stock.
-router.put('/pedidos/:id/cancelar', requireLogin, async (req, res, next) => {
-  const conn = await db.getConnection();
+router.put('/pedidos/:id/cancelar', requireCliente, async (req, res, next) => {
+  let conn;
   try {
+    conn = await db.getConnection();
     await conn.beginTransaction();
     const [[ped]] = await conn.query(
       'SELECT id, estado FROM pedidos WHERE id = ? AND usuario_id = ? FOR UPDATE',
@@ -217,16 +260,16 @@ router.put('/pedidos/:id/cancelar', requireLogin, async (req, res, next) => {
     await conn.commit();
     res.json({ ok: true, estado: 'Cancelado' });
   } catch (err) {
-    await conn.rollback();
+    if (conn) await conn.rollback();
     next(err);
   } finally {
-    conn.release();
+    if (conn) conn.release();
   }
 });
 
 // Marca el pedido como Cancelado y devuelve las unidades al inventario
 async function anularPedido(conn, pedidoId) {
-  const [det] = await conn.query('SELECT producto_id, cantidad FROM pedido_detalle WHERE pedido_id = ?', [pedidoId]);
+  const [det] = await conn.query('SELECT producto_id, cantidad FROM pedido_detalle WHERE pedido_id = ? ORDER BY producto_id', [pedidoId]);
   for (const d of det) {
     await conn.query('UPDATE productos SET stock = stock + ? WHERE id = ?', [d.cantidad, d.producto_id]);
   }

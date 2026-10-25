@@ -3,8 +3,9 @@
 const bcrypt = require('bcryptjs');
 const db = require('./db');
 
-const ADMIN_EMAIL = 'admin@peluchitos.com';
-const ADMIN_PASS = 'Admin123!';
+const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+const ADMIN_PASS = process.env.ADMIN_PASSWORD || '';
+const ADMIN_NAME = process.env.ADMIN_NAME || 'Administrador';
 
 const productos = [
   ['Osito Abrazos', 'Osito suave de felpa, perfecto para dormir abrazado.', 85.00, 20, '🧸'],
@@ -19,12 +20,13 @@ const productos = [
 
 (async () => {
   try {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ADMIN_EMAIL) || ADMIN_PASS.length < 12) throw new Error('Configura ADMIN_EMAIL y ADMIN_PASSWORD (mínimo 12 caracteres).');
     const hash = await bcrypt.hash(ADMIN_PASS, 10);
     await db.query(
       `INSERT INTO usuarios (nombre, email, password_hash, rol)
        VALUES (?, ?, ?, 'admin')
-       ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), rol = 'admin'`,
-      ['Administrador', ADMIN_EMAIL, hash]
+       ON DUPLICATE KEY UPDATE id = id`,
+      [ADMIN_NAME, ADMIN_EMAIL, hash]
     );
 
     const [[{ total }]] = await db.query('SELECT COUNT(*) AS total FROM productos');
@@ -37,9 +39,10 @@ const productos = [
     } else {
       console.log('Ya había productos, no se agregaron los de ejemplo.');
     }
-    console.log(`Admin listo -> correo: ${ADMIN_EMAIL}  |  contraseña: ${ADMIN_PASS}`);
+    console.log('Administrador inicializado; las cuentas existentes no se modificaron.');
   } catch (err) {
-    console.error('Error en el seed:', err.message);
+    console.error('No se pudo completar el seed:', err.code || err.message);
+    process.exitCode = 1;
   } finally {
     await db.end();
   }
