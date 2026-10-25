@@ -10,7 +10,7 @@
 <body>
   <div id="nav"></div>
   <div class="container py-4">
-    <h2 class="mb-3">Tu carrito 🛒</h2>
+    <div class="page-heading"><span class="eyebrow">Un abrazo más cerca</span><h1>Tu bolsita de ternura</h1><p>Revisa tus peluchitos y cuéntanos a dónde irán contigo.</p></div>
     <div id="vacio" class="alert alert-info d-none">Tu carrito está vacío. <a href="/index.html">Ir al catálogo</a></div>
 
     <div id="no-disponible" class="alert alert-warning d-none">Hay productos inactivos o sin existencias suficientes. Quita los inactivos y ajusta las cantidades antes de comprar.</div>
@@ -24,7 +24,7 @@
               <tbody id="filas"></tbody>
             </table>
           </div>
-          <div class="text-end fs-5 fw-bold mt-3">Total: <span id="total"></span></div>
+          <div class="text-end fs-5 fw-bold mt-3 cart-total">Total: <span id="total"></span></div>
         </div>
       </div>
 
@@ -32,9 +32,9 @@
       <div class="col-lg-5">
         <form class="card p-3" id="form-compra">
           <h5>Datos de envío</h5>
-          <div class="mb-2"><label class="form-label">Dirección</label>
+          <div class="mb-2"><label class="form-label" for="direccion">Dirección</label>
             <input class="form-control" id="direccion" required minlength="5"></div>
-          <div class="mb-3"><label class="form-label">Teléfono</label>
+          <div class="mb-3"><label class="form-label" for="telefono">Teléfono</label>
             <input class="form-control" id="telefono" required placeholder="5555-5555"></div>
 
           <h5>Forma de pago</h5>

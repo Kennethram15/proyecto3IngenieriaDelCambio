@@ -10,9 +10,39 @@
 <body>
   <div id="nav"></div>
   <div class="container py-4">
-    <h2 class="mb-1">Nuestros peluches 🧸</h2>
-    <p class="text-muted">Elige tu compañero favorito y agrégalo al carrito.</p>
-    <div class="row g-3" id="catalogo"></div>
+    <section class="hero" aria-labelledby="bienvenida">
+      <div class="hero-copy">
+        <span class="eyebrow">Pequeños amigos, grandes abrazos</span>
+        <h1 id="bienvenida">Un poquito de ternura<br>para <span>cada día.</span></h1>
+        <p>Encuentra ese compañero suavecito que hace de cualquier rincón un lugar feliz.</p>
+        <a class="btn btn-primary" href="#coleccion">Conoce a tus nuevos amigos <span aria-hidden="true">↗</span></a>
+      </div>
+      <div class="hero-art" role="img" aria-label="Osito de peluche con bufanda verde sobre un fondo crema">
+        <div class="art-circle"></div><div class="art-ground"></div>
+        <span class="art-spark spark-one" aria-hidden="true">✦</span>
+        <span class="art-spark spark-two" aria-hidden="true">✧</span>
+        <div class="bear" aria-hidden="true">
+          <div class="bear-ear left"></div><div class="bear-ear right"></div>
+          <div class="bear-body"></div><div class="bear-arm left"></div><div class="bear-arm right"></div>
+          <div class="bear-foot left"></div><div class="bear-foot right"></div>
+          <div class="bear-head"><i class="bear-eye left"></i><i class="bear-eye right"></i><i class="bear-cheek left"></i><i class="bear-cheek right"></i><div class="bear-muzzle"></div></div>
+          <div class="bear-scarf"></div>
+        </div>
+        <span class="art-note" aria-hidden="true">¡Un abrazo te espera! ♡</span>
+      </div>
+    </section>
+    <div class="shop-values" aria-label="Nuestra tienda">
+      <span><span aria-hidden="true">✿</span> Mucha ternura</span>
+      <span><span aria-hidden="true">♡</span> Compañeros para regalar</span>
+      <span><span aria-hidden="true">⌂</span> Un toque de alegría en casa</span>
+    </div>
+    <section aria-labelledby="coleccion">
+      <div class="section-heading">
+        <div><span class="eyebrow">La colección</span><h2 id="coleccion">Encuentra a tu favorito</h2><p>Cada uno tiene algo especial. ¿Cuál se va contigo?</p></div>
+        <span class="collection-tag">Hechos para acompañarte ♡</span>
+      </div>
+      <div class="row g-3 g-lg-4" id="catalogo" aria-live="polite"></div>
+    </section>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
@@ -28,15 +58,17 @@
 
       cont.innerHTML = productos.map(p => `
         <div class="col-6 col-md-4 col-lg-3">
-          <div class="card h-100 p-3">
+          <div class="card product-card h-100">
             <div class="peluche-emoji">${esc(p.emoji)}</div>
-            <h5 class="mt-2">${esc(p.nombre)}</h5>
+            <div class="product-info">
+            <h5>${esc(p.nombre)}</h5>
             <p class="small text-muted flex-grow-1">${esc(p.descripcion)}</p>
-            <div class="fw-bold">${q(p.precio)}</div>
-            <div class="small mb-2 ${p.stock <= 5 ? 'stock-bajo' : 'text-muted'}">
+            <div class="product-price">${q(p.precio)}</div>
+            <div class="product-stock ${p.stock <= 5 ? 'stock-bajo' : 'text-muted'}">
               ${p.stock > 0 ? (p.stock <= 5 ? `¡Solo quedan ${p.stock}!` : `${p.stock} disponibles`) : 'Agotado'}
             </div>
             <button class="btn btn-primary btn-sm" data-id="${p.id}" ${p.stock === 0 ? 'disabled' : ''}>Agregar al carrito</button>
+            </div>
           </div>
         </div>`).join('');
 
