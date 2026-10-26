@@ -16,6 +16,7 @@
       <li class="nav-item"><button class="nav-link active" data-tab="productos">Productos e inventario</button></li>
       <li class="nav-item"><button class="nav-link" data-tab="pedidos">Pedidos</button></li>
       <li class="nav-item"><button class="nav-link" data-tab="usuarios">Usuarios</button></li>
+      <li class="nav-item"><button class="nav-link" data-tab="reportes">Reportes</button></li>
     </ul>
 
     <!-- PRODUCTOS -->
@@ -48,6 +49,23 @@
 
     <!-- USUARIOS -->
     <section id="tab-usuarios" class="d-none">
+      <form class="card p-3 mb-3" id="form-rol">
+        <h5>Nuevo rol</h5>
+        <label for="rol-nombre" class="form-label">Nombre del rol</label>
+        <div class="d-flex gap-2"><input id="rol-nombre" class="form-control" minlength="2" maxlength="50" placeholder="Ej.: repartidor, cajero" required><button class="btn btn-primary text-nowrap">Crear rol</button></div>
+        <p class="small text-muted mb-0 mt-2">Solo el rol admin tiene acceso a este panel. Los roles personalizados identifican al personal; no otorgan permisos adicionales.</p>
+      </form>
+      <form class="card p-3 mb-3" id="form-usuario">
+        <h5>Nuevo usuario</h5>
+        <div class="row g-2">
+          <div class="col-md-6"><label for="u-nombre" class="form-label">Nombre</label><input id="u-nombre" class="form-control" minlength="2" maxlength="100" required></div>
+          <div class="col-md-6"><label for="u-email" class="form-label">Correo</label><input id="u-email" type="email" class="form-control" maxlength="120" autocomplete="off" required></div>
+          <div class="col-md-6"><label for="u-pass" class="form-label">Contraseña</label><input id="u-pass" type="password" class="form-control" minlength="6" autocomplete="new-password" required></div>
+          <div class="col-md-6"><label for="u-confirmar" class="form-label">Confirmar contraseña</label><input id="u-confirmar" type="password" class="form-control" minlength="6" autocomplete="new-password" required></div>
+          <div class="col-md-6"><label for="u-rol" class="form-label">Rol</label><select id="u-rol" class="form-select" required></select></div>
+        </div>
+        <div class="mt-2"><button class="btn btn-primary">Crear usuario</button></div>
+      </form>
       <div class="card p-3"><div class="table-responsive">
         <table class="table align-middle mb-0">
           <thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Pedidos</th><th>Estado</th><th></th></tr></thead>
@@ -55,10 +73,22 @@
         </table>
       </div></div>
     </section>
+    <section id="tab-reportes" class="d-none">
+      <form id="form-reporte" class="card p-3 mb-3">
+        <h5>Generar reporte</h5>
+        <label for="reporte-tipo" class="form-label">Tipo de reporte</label>
+        <select id="reporte-tipo" class="form-select mb-2"><option value="stock">Stock e inventario</option><option value="pedidos">Pedidos</option><option value="ventas">Ventas por producto</option></select>
+        <p class="small text-muted">Stock incluye productos activos e inactivos. Ventas incluye pedidos no cancelados, aunque estén pendientes de pago.</p>
+        <div class="d-flex gap-2"><button class="btn btn-primary">Generar reporte</button><button type="button" id="exportar-pdf" class="btn btn-outline-primary" disabled>Exportar PDF</button></div>
+      </form>
+      <div id="vista-reporte" class="card p-3" aria-live="polite">Selecciona un reporte y pulsa Generar reporte.</div>
+    </section>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="/js/app.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"></script>
   <script>
     const $ = id => document.getElementById(id);
     let productos = [];
@@ -72,10 +102,10 @@
     // ----- Pestañas -----
     document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => {
       document.querySelectorAll('[data-tab]').forEach(x => x.classList.toggle('active', x === b));
-      ['productos', 'pedidos', 'usuarios'].forEach(t => $('tab-' + t).classList.toggle('d-none', t !== b.dataset.tab));
+      ['productos', 'pedidos', 'usuarios', 'reportes'].forEach(t => $('tab-' + t).classList.toggle('d-none', t !== b.dataset.tab));
       if (b.dataset.tab === 'productos') cargarProductos();
       if (b.dataset.tab === 'pedidos') cargarPedidos();
-      if (b.dataset.tab === 'usuarios') cargarUsuarios();
+      if (b.dataset.tab === 'usuarios') { cargarUsuarios(); cargarRoles(); }
     });
 
     // ----- Productos -----
@@ -177,6 +207,70 @@
     }
 
     // ----- Usuarios -----
+    async function cargarRoles(seleccionado) {
+      try {
+        const roles = await api('/api/admin/roles');
+        $('u-rol').innerHTML = roles.map(r => `<option value="${esc(r.nombre)}">${esc(r.nombre)}</option>`).join('');
+        $('u-rol').value = seleccionado || 'cliente';
+      } catch (err) { aviso(err.message, 'danger'); }
+    }
+    $('form-rol').onsubmit = async e => {
+      e.preventDefault();
+      try {
+        const r = await api('/api/admin/roles', 'POST', { nombre: $('rol-nombre').value });
+        $('form-rol').reset();
+        await cargarRoles(r.nombre);
+        aviso('Rol creado. Ya puedes asignarlo al nuevo usuario.');
+      } catch (err) { aviso(err.message, 'danger'); }
+    };
+    $('form-usuario').onsubmit = async e => {
+      e.preventDefault();
+      if ($('u-pass').value !== $('u-confirmar').value) { aviso('Las contraseñas no coinciden.', 'danger'); return; }
+      try {
+        await api('/api/admin/usuarios', 'POST', {
+          nombre: $('u-nombre').value, email: $('u-email').value, rol: $('u-rol').value,
+          password: $('u-pass').value, confirmarPassword: $('u-confirmar').value
+        });
+        $('form-usuario').reset();
+        aviso('Usuario creado.');
+        await cargarUsuarios();
+      } catch (err) { aviso(err.message, 'danger'); }
+    };
+
+    // ----- Reportes -----
+    let reporteActual = null;
+    const formatosReporte = {
+      stock: { titulo: 'Stock e inventario', columnas: ['ID', 'Producto', 'Precio (Q)', 'Stock', 'Estado', 'Valor (Q)'], fila: r => [r.id, r.nombre, Number(r.precio).toFixed(2), r.stock, r.activo ? 'Activo' : 'Inactivo', Number(r.valor).toFixed(2)] },
+      pedidos: { titulo: 'Pedidos', columnas: ['Pedido', 'Cliente', 'Fecha', 'Estado', 'Pago', 'Total (Q)'], fila: r => [r.id, r.cliente, new Date(r.fecha).toLocaleString(), r.estado, r.metodo_pago === 'tarjeta' ? 'Tarjeta' : 'Contra entrega', Number(r.total).toFixed(2)] },
+      ventas: { titulo: 'Ventas por producto (pedidos no cancelados)', columnas: ['ID', 'Producto', 'Unidades', 'Importe (Q)'], fila: r => [r.id, r.nombre, r.unidades, Number(r.importe).toFixed(2)] }
+    };
+    $('form-reporte').onsubmit = async e => {
+      e.preventDefault();
+      $('exportar-pdf').disabled = true;
+      reporteActual = null;
+      try {
+        const r = await api('/api/admin/reportes/' + $('reporte-tipo').value);
+        const f = formatosReporte[r.tipo];
+        reporteActual = { ...r, ...f, datos: r.filas.map(f.fila) };
+        $('vista-reporte').innerHTML = `<h5>${esc(f.titulo)}</h5><p>Generado: ${esc(new Date(r.generado).toLocaleString())}</p><div class="table-responsive"><table class="table"><thead><tr>${f.columnas.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${reporteActual.datos.map(fila => `<tr>${fila.map(c => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>${r.filas.length ? '' : '<p>No hay datos para este reporte.</p>'}`;
+        $('exportar-pdf').disabled = false;
+      } catch (err) { $('vista-reporte').textContent = 'No se pudo generar el reporte.'; aviso(err.message, 'danger'); }
+    };
+    $('exportar-pdf').onclick = () => {
+      if (!reporteActual) return;
+      try {
+        const r = reporteActual;
+        const doc = new window.jspdf.jsPDF({ orientation: 'landscape' });
+        doc.setFontSize(15);
+        doc.text('Peluchitos - ' + r.titulo, 14, 18);
+        doc.setFontSize(10);
+        doc.text('Generado: ' + new Date(r.generado).toLocaleString(), 14, 26);
+        doc.autoTable({ startY: 32, head: [r.columnas], body: r.datos, styles: { fontSize: 9 }, margin: { bottom: 15 } });
+        if (!r.datos.length) doc.text('No hay datos para este reporte.', 14, doc.lastAutoTable.finalY + 10);
+        doc.save('peluchitos-' + r.tipo + '-' + r.generado.slice(0, 10) + '.pdf');
+      } catch (err) { aviso('No se pudo exportar el PDF. Comprueba tu conexión y vuelve a cargar la página.', 'danger'); }
+    };
+
     async function cargarUsuarios() {
       const us = await api('/api/admin/usuarios');
       $('filas-usuarios').innerHTML = us.map(u => `
@@ -184,7 +278,7 @@
           <td>${esc(u.nombre)}</td><td>${esc(u.email)}</td>
           <td>${esc(u.rol)}</td><td>${u.pedidos}</td>
           <td>${u.activo ? '<span class="badge text-bg-success">Activo</span>' : '<span class="badge text-bg-secondary">Desactivado</span>'}</td>
-          <td>${u.rol === 'cliente'
+          <td>${u.rol !== 'admin'
             ? `<button class="btn btn-outline-secondary btn-sm" data-user="${u.id}" data-activo="${u.activo ? 0 : 1}">${u.activo ? 'Desactivar' : 'Activar'}</button>` : ''}</td>
         </tr>`).join('');
       document.querySelectorAll('[data-user]').forEach(b => b.onclick = async () => {

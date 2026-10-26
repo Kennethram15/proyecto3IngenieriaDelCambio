@@ -3,12 +3,17 @@
 CREATE DATABASE IF NOT EXISTS peluchitos CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE peluchitos;
 
+CREATE TABLE IF NOT EXISTS roles (
+  nombre VARCHAR(50) PRIMARY KEY
+);
+INSERT IGNORE INTO roles (nombre) VALUES ('cliente'), ('admin');
+
 CREATE TABLE IF NOT EXISTS usuarios (
   id INT AUTO_INCREMENT PRIMARY KEY,
   nombre VARCHAR(100) NOT NULL,
   email VARCHAR(120) NOT NULL UNIQUE,
   password_hash VARCHAR(100) NOT NULL,
-  rol ENUM('cliente','admin') NOT NULL DEFAULT 'cliente',
+  rol VARCHAR(50) NOT NULL DEFAULT 'cliente',
   activo TINYINT(1) NOT NULL DEFAULT 1,
   creado TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

@@ -37,6 +37,8 @@
           <input type="email" class="form-control" id="r-email" autocomplete="username" placeholder="tu@correo.com" required></div>
         <div class="mb-3"><label class="form-label" for="r-pass">Contraseña (mínimo 6 caracteres)</label>
           <input type="password" class="form-control" id="r-pass" autocomplete="new-password" placeholder="Crea tu contraseña" minlength="6" required></div>
+        <div class="mb-3"><label class="form-label" for="r-confirmar">Confirmar contraseña</label>
+          <input type="password" class="form-control" id="r-confirmar" autocomplete="new-password" minlength="6" required></div>
         <button class="btn btn-primary w-100">Crear cuenta</button>
       </form>
     </div>
@@ -72,9 +74,11 @@
 
     $('form-registro').onsubmit = async e => {
       e.preventDefault();
+      if ($('r-pass').value !== $('r-confirmar').value) { aviso('Las contraseñas no coinciden.', 'danger'); return; }
       try {
         const { user } = await api('/api/auth/registro', 'POST', {
-          nombre: $('r-nombre').value, email: $('r-email').value, password: $('r-pass').value
+          nombre: $('r-nombre').value, email: $('r-email').value, password: $('r-pass').value,
+          confirmarPassword: $('r-confirmar').value
         });
         irADestino(user);
       } catch (err) { aviso(err.message, 'danger'); }

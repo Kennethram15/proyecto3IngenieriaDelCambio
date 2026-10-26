@@ -18,6 +18,7 @@ router.post('/registro', async (req, res, next) => {
     if ((nombre.length < 2 || nombre.length > 100)) return res.status(400).json({ error: 'Escribe tu nombre.' });
     if ((!EMAIL_RE.test(email) || email.length > 120)) return res.status(400).json({ error: 'Correo no válido.' });
     if (password.length < 6) return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres.' });
+    if (password !== req.body.confirmarPassword) return res.status(400).json({ error: 'Las contraseñas no coinciden.' });
 
     const [existe] = await db.query('SELECT id FROM usuarios WHERE email = ?', [email]);
     if (existe.length) return res.status(409).json({ error: 'Ese correo ya está registrado.' });

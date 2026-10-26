@@ -6,9 +6,10 @@ const { integer, price } = require('../validation');
 
 // Doble de MySQL: prueba HTTP, sesiones reales y consultas esperadas.
 // No sustituye las pruebas de bloqueos y aislamiento con InnoDB.
-let users, product, cart, orders, details, server, base, failDetail;
+let users, product, cart, orders, details, server, base, failDetail, roles;
 let queue = Promise.resolve();
 function reset() {
+  roles = [{ nombre: 'admin' }, { nombre: 'cliente' }];
   users = [
     { id: 1, nombre: 'Cliente', email: 'cliente@example.test', rol: 'cliente', activo: 1, password_hash: bcrypt.hashSync('Test-password-123', 4) },
     { id: 2, nombre: 'Admin', email: 'admin@example.test', rol: 'admin', activo: 1, password_hash: bcrypt.hashSync('Test-password-123', 4) }
@@ -18,12 +19,23 @@ function reset() {
 }
 async function query(sql, args = []) {
   sql = sql.replace(/\s+/g, ' ').trim();
+  if (sql.startsWith('SELECT nombre FROM roles')) return [args.length ? roles.filter(r => r.nombre === args[0]) : roles];
+  if (sql.startsWith('INSERT INTO roles')) {
+    if (roles.some(r => r.nombre === args[0])) throw Object.assign(new Error('Duplicado'), { code: 'ER_DUP_ENTRY' });
+    roles.push({ nombre: args[0] }); return [{}];
+  }
+  if (sql.startsWith('SELECT id, nombre, precio, stock')) return [[{ ...product, valor: product.precio * product.stock }]];
+  if (sql.startsWith('SELECT p.id, u.nombre AS cliente')) return [orders.map(p => ({ ...p, cliente: users.find(u => u.id === p.usuario_id).nombre }))];
+  if (sql.startsWith('SELECT pr.id, pr.nombre, SUM')) {
+    const vendidos = details.filter(d => orders.some(p => p.id === d.pedido_id && p.estado !== 'Cancelado'));
+    return [vendidos.length ? [{ id: product.id, nombre: product.nombre, unidades: vendidos.reduce((n, d) => n + d.cantidad, 0), importe: vendidos.reduce((n, d) => n + d.cantidad * d.precio_unitario, 0) }] : []];
+  }
   if (sql.startsWith('SELECT id, nombre, email, rol, activo FROM usuarios')) return [users.filter(u => u.id === args[0]).map(({ password_hash, ...u }) => ({ ...u }))];
   if (sql.startsWith('SELECT * FROM usuarios WHERE email') || sql.startsWith('SELECT id FROM usuarios WHERE email')) return [users.filter(u => u.email === args[0])];
   if (sql.startsWith('SELECT id FROM usuarios WHERE id')) return [users.filter(u => u.id === args[0])];
   if (sql.startsWith('INSERT INTO usuarios')) {
     const id = users.length + 1;
-    users.push({ id, nombre: args[0], email: args[1], password_hash: args[2], rol: 'cliente', activo: 1 });
+    users.push({ id, nombre: args[0], email: args[1], password_hash: args[2], rol: args[3] || 'cliente', activo: 1 });
     return [{ insertId: id }];
   }
   if (sql.startsWith('SELECT stock FROM productos')) return [[...(product.activo && args[0] === product.id ? [{ stock: product.stock }] : [])]];
@@ -107,7 +119,7 @@ function client() {
 }
 async function login(admin = false) {
   const c = client();
-  assert.equal((await c.request('/api/auth/login', 'POST', { email: admin ? 'admin@example.test' : 'cliente@example.test', password: 'Test-password-123' })).status, 200);
+  assert.equal((await c.request('/api/auth/login', 'POST', { email: admin ? 'admin@example.test' : 'cliente@example.test', password: 'Test-password-123', confirmarPassword: 'Test-password-123' })).status, 200);
   return c;
 }
 const shipping = { direccion: 'Direccion de prueba', telefono: '55555555', metodo_pago: 'contra_entrega' };
@@ -139,14 +151,14 @@ test('administracion rechaza precios y existencias invalidos antes de consultar 
 test('registro, credenciales incorrectas, regeneracion de sesion y logout', async () => {
   reset(); const c = client();
   assert.equal((await c.request('/api/auth/login', 'POST', { email: users[0].email, password: 'incorrecta' })).status, 401);
-  assert.equal((await c.request('/api/auth/registro', 'POST', { nombre: 'Nuevo', email: 'nuevo@example.test', password: 'Test-password-123' })).status, 201);
+  assert.equal((await c.request('/api/auth/registro', 'POST', { nombre: 'Nuevo', email: 'nuevo@example.test', password: 'Test-password-123', confirmarPassword: 'Test-password-123' })).status, 201);
   const old = c.cookie;
-  assert.equal((await c.request('/api/auth/login', 'POST', { email: 'nuevo@example.test', password: 'Test-password-123' })).status, 200);
+  assert.equal((await c.request('/api/auth/login', 'POST', { email: 'nuevo@example.test', password: 'Test-password-123', confirmarPassword: 'Test-password-123' })).status, 200);
   assert.notEqual(c.cookie, old);
   const stale = await fetch(base + '/api/carrito', { headers: { Cookie: old } });
   assert.equal(stale.status, 401);
   const beforeRegistration = c.cookie;
-  assert.equal((await c.request('/api/auth/registro', 'POST', { nombre: 'Otro', email: 'otro@example.test', password: 'Test-password-123' })).status, 201);
+  assert.equal((await c.request('/api/auth/registro', 'POST', { nombre: 'Otro', email: 'otro@example.test', password: 'Test-password-123', confirmarPassword: 'Test-password-123' })).status, 201);
   assert.notEqual(c.cookie, beforeRegistration);
   assert.equal((await c.request('/api/auth/logout', 'POST')).status, 200);
   assert.equal((await c.request('/api/carrito')).status, 401);
@@ -158,7 +170,7 @@ test('permisos, rol actualizado, cuenta eliminada y desactivada con sesion abier
   users[0].rol = 'admin'; assert.equal((await c.request('/api/carrito')).status, 403);
   users[0].activo = 0; assert.equal((await c.request('/api/carrito')).status, 401);
   assert.equal((await c.request('/api/auth/yo')).body.user, null);
-  users[1].activo = 0; assert.equal((await admin.request('/api/auth/login', 'POST', { email: users[1].email, password: 'Test-password-123' })).status, 403);
+  users[1].activo = 0; assert.equal((await admin.request('/api/auth/login', 'POST', { email: users[1].email, password: 'Test-password-123', confirmarPassword: 'Test-password-123' })).status, 403);
   users = []; assert.equal((await admin.request('/api/admin/pedidos')).status, 401);
 });
 test('carrito: agregar, modificar, quitar, rechazar cantidades y stock', async () => {
@@ -201,7 +213,7 @@ test('tarjeta simulada aprobada y rechazada, stock insuficiente y rollback', asy
 test('cancelacion concurrente repone una sola vez y protege pedidos ajenos', async () => {
   reset(); const c = await login(); await add(c); await c.request('/api/pedidos', 'POST', shipping);
   const other = client();
-  await other.request('/api/auth/registro', 'POST', { nombre: 'Otro', email: 'otro@example.test', password: 'Test-password-123' });
+  await other.request('/api/auth/registro', 'POST', { nombre: 'Otro', email: 'otro@example.test', password: 'Test-password-123', confirmarPassword: 'Test-password-123' });
   assert.equal((await other.request('/api/pedidos/1/cancelar', 'PUT')).status, 404);
   assert.equal((await other.request('/api/pedidos')).body.length, 0);
   const results = await Promise.all([1, 2].map(() => c.request('/api/pedidos/1/cancelar', 'PUT')));
@@ -228,6 +240,59 @@ test('flujo de estados y anulacion administrativa solo antes del envio', async (
     assert.equal(product.stock, stock);
   }
 });
+test('confirmacion obligatoria y registro publico siempre cliente', async () => {
+  reset(); const c = client();
+  const datos = { nombre: 'Nuevo', email: 'nuevo@example.test', password: 'abcdef', rol: 'admin' };
+  for (const confirmarPassword of [undefined, '', 'distinta']) {
+    assert.equal((await c.request('/api/auth/registro', 'POST', { ...datos, confirmarPassword })).status, 400);
+  }
+  const r = await c.request('/api/auth/registro', 'POST', { ...datos, confirmarPassword: 'abcdef' });
+  assert.equal(r.status, 201); assert.equal(r.body.user.rol, 'cliente');
+});
+
+test('solo admin crea roles y usuarios sin cambiar su propia sesion', async () => {
+  reset(); const c = await login(); const admin = await login(true);
+  for (const path of ['/api/admin/roles', '/api/admin/usuarios']) {
+    assert.equal((await c.request(path, 'POST', {})).status, 403);
+    assert.equal((await client().request(path, 'POST', {})).status, 401);
+  }
+  assert.equal((await admin.request('/api/admin/roles', 'POST', { nombre: 'Repartidor' })).status, 201);
+  assert.equal((await admin.request('/api/admin/roles', 'POST', { nombre: 'repartidor' })).status, 409);
+  assert.equal((await admin.request('/api/admin/roles', 'POST', { nombre: '<script>' })).status, 400);
+  assert.ok((await admin.request('/api/admin/roles')).body.some(r => r.nombre === 'repartidor'));
+  const datos = { nombre: 'Personal', email: 'personal@example.test', password: 'abcdef', confirmarPassword: 'abcdef', rol: 'inexistente' };
+  assert.equal((await admin.request('/api/admin/usuarios', 'POST', datos)).status, 400);
+  assert.equal((await admin.request('/api/admin/usuarios', 'POST', { ...datos, rol: 'admin', confirmarPassword: 'otra' })).status, 400);
+  for (const rol of ['admin', 'repartidor']) {
+    const email = 'nuevo-' + rol + '@example.test';
+    assert.equal((await admin.request('/api/admin/usuarios', 'POST', { ...datos, email, rol })).status, 201);
+    const nuevo = client();
+    assert.equal((await nuevo.request('/api/auth/login', 'POST', { email, password: 'abcdef' })).body.user.rol, rol);
+    assert.equal((await nuevo.request('/api/admin/roles')).status, rol === 'admin' ? 200 : 403);
+    const guardado = users.find(u => u.email === email);
+    assert.notEqual(guardado.password_hash, 'abcdef');
+    assert.ok(await bcrypt.compare('abcdef', guardado.password_hash));
+  }
+  assert.equal((await admin.request('/api/auth/yo')).body.user.id, 2);
+});
+
+test('reportes protegidos, inventario y ventas excluyen cancelaciones', async () => {
+  reset(); const c = await login(); const admin = await login(true);
+  for (const tipo of ['stock', 'pedidos', 'ventas']) {
+    assert.equal((await c.request('/api/admin/reportes/' + tipo)).status, 403);
+    assert.equal((await client().request('/api/admin/reportes/' + tipo)).status, 401);
+  }
+  assert.equal((await admin.request('/api/admin/reportes/inexistente')).status, 400);
+  assert.equal((await admin.request('/api/admin/reportes/stock')).body.filas[0].valor, 852.5);
+  assert.deepEqual((await admin.request('/api/admin/reportes/ventas')).body.filas, []);
+  await add(c); await c.request('/api/pedidos', 'POST', shipping);
+  const r = (await admin.request('/api/admin/reportes/ventas')).body;
+  assert.ok(r.generado); assert.equal(r.filas[0].importe, 170.5);
+  assert.equal((await admin.request('/api/admin/reportes/pedidos')).body.filas.length, 1);
+  await c.request('/api/pedidos/1/cancelar', 'PUT');
+  assert.deepEqual((await admin.request('/api/admin/reportes/ventas')).body.filas, []);
+});
+
 test('errores de conexion en rutas async devuelven 500', async () => {
   reset(); const c = await login(); const original = db.getConnection;
   db.getConnection = async () => { throw new Error('Conexion de prueba no disponible'); };

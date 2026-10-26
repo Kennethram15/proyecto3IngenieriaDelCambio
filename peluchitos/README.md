@@ -117,4 +117,12 @@ En este entorno MySQL rechazó la conexión (`ECONNREFUSED`); no se ejecutaron p
 7. Despachar, enviar y entregar; comprobar que el cliente no cancela desde Despachado y que el administrador no anula desde Enviado.
 8. Revisar en navegador los botones, mensajes y adaptación responsive de catálogo, carrito, pedidos y administración.
 
-No ejecutes estas pruebas sobre una base de producción. No se requieren cambios al esquema existente.
+No ejecutes estas pruebas sobre una base de producción.
+
+## Actualización: roles y reportes
+
+Si ya tienes la base de datos creada, ejecuta una vez `migrations/001_roles.sql` en MySQL antes de usar la nueva gestión de usuarios. Por ejemplo, desde CMD: `mysql -u root -p < migrations/001_roles.sql`. También puedes abrir y ejecutar el archivo en MySQL Workbench. La migración conserva los datos existentes; no necesitas ejecutar el seed. Las instalaciones nuevas usan `database.sql` directamente.
+
+En **Panel admin → Usuarios** puedes crear roles y cuentas con rol cliente, admin o personalizado. Solo admin accede a la administración; los roles personalizados identifican al personal y no incorporan permisos adicionales. Tanto el registro público como la creación administrativa exigen confirmar la contraseña.
+
+En **Reportes**, selecciona stock, pedidos o ventas por producto y pulsa **Generar reporte** para visualizar los datos actuales. **Exportar PDF** descarga el reporte generado, con tablas que continúan en las páginas necesarias. La exportación requiere cargar jsPDF y AutoTable desde el CDN (conexión a Internet, igual que Bootstrap). Stock muestra todos los productos y su valor a precio de venta. Ventas usa los precios históricos del detalle y excluye pedidos cancelados; incluye pedidos pendientes y no representa exclusivamente cobros recibidos.

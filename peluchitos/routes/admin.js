@@ -1,4 +1,5 @@
 const express = require('express');
+const bcrypt = require('bcryptjs');
 const db = require('../db');
 const { requireAdmin } = require('../middleware/auth');
 const { anularPedido } = require('./tienda');
@@ -137,6 +138,67 @@ router.put('/pedidos/:id/estado', async (req, res, next) => {
   } finally {
     if (conn) conn.release();
   }
+});
+
+// ---------- Roles y creación de usuarios ----------
+router.get('/roles', async (req, res, next) => {
+  try {
+    const [roles] = await db.query('SELECT nombre FROM roles ORDER BY nombre');
+    res.json(roles);
+  } catch (err) { next(err); }
+});
+
+router.post('/roles', async (req, res, next) => {
+  try {
+    const nombre = String(req.body.nombre || '').trim().toLowerCase();
+    if (!/^[a-záéíóúñ][a-záéíóúñ0-9 _-]{1,49}$/.test(nombre)) return res.status(400).json({ error: 'El rol debe tener entre 2 y 50 caracteres: letras, números, espacios, guiones o guiones bajos.' });
+    await db.query('INSERT INTO roles (nombre) VALUES (?)', [nombre]);
+    res.status(201).json({ nombre });
+  } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Ese rol ya existe.' });
+    next(err);
+  }
+});
+
+router.post('/usuarios', async (req, res, next) => {
+  try {
+    const nombre = String(req.body.nombre || '').trim();
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const password = String(req.body.password || '');
+    const rol = String(req.body.rol || '').trim().toLowerCase();
+    if (nombre.length < 2 || nombre.length > 100) return res.status(400).json({ error: 'Escribe un nombre de entre 2 y 100 caracteres.' });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 120) return res.status(400).json({ error: 'Correo no válido.' });
+    if (password.length < 6) return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres.' });
+    if (password !== req.body.confirmarPassword) return res.status(400).json({ error: 'Las contraseñas no coinciden.' });
+    const [[existe]] = await db.query('SELECT nombre FROM roles WHERE nombre = ?', [rol]);
+    if (!existe) return res.status(400).json({ error: 'Selecciona un rol existente.' });
+    const hash = await bcrypt.hash(password, 10);
+    const [r] = await db.query('INSERT INTO usuarios (nombre, email, password_hash, rol) VALUES (?, ?, ?, ?)', [nombre, email, hash, rol]);
+    res.status(201).json({ id: r.insertId });
+  } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Ese correo ya está registrado.' });
+    next(err);
+  }
+});
+
+// Reportes: se generan con los datos actuales y sin información de contraseñas o tarjetas.
+router.get('/reportes/:tipo', async (req, res, next) => {
+  try {
+    const consultas = {
+      stock: `SELECT id, nombre, precio, stock, activo, ROUND(precio * stock, 2) AS valor FROM productos ORDER BY stock, nombre`,
+      pedidos: `SELECT p.id, u.nombre AS cliente, p.fecha, p.estado, p.metodo_pago, p.total
+                FROM pedidos p JOIN usuarios u ON u.id = p.usuario_id ORDER BY p.fecha DESC, p.id DESC`,
+      ventas: `SELECT pr.id, pr.nombre, SUM(d.cantidad) AS unidades,
+                      SUM(d.cantidad * d.precio_unitario) AS importe
+               FROM pedido_detalle d JOIN pedidos p ON p.id = d.pedido_id
+               JOIN productos pr ON pr.id = d.producto_id
+               WHERE p.estado <> 'Cancelado'
+               GROUP BY pr.id, pr.nombre ORDER BY importe DESC, pr.id`
+    };
+    if (!Object.hasOwn(consultas, req.params.tipo)) return res.status(400).json({ error: 'Tipo de reporte no válido.' });
+    const [filas] = await db.query(consultas[req.params.tipo]);
+    res.json({ tipo: req.params.tipo, generado: new Date().toISOString(), filas });
+  } catch (err) { next(err); }
 });
 
 // ---------- Usuarios / clientes ----------
